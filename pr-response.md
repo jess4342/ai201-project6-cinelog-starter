@@ -180,12 +180,27 @@ endpoint returns 404 (`NotInWatchlistError`).
 
 ---
 
+## Reviewer Follow-up — route-level error handling
+
+A reviewer pointed out that while my *service* layer mirrored the collection feature, the
+`add_film` **route** did not: it called `add_to_watchlist()` without a try/except, so
+`FilmNotFoundError` and `AlreadyInWatchlistError` would have bubbled up as unhandled **500s**
+instead of the 404 / 409 that `routes/collection.py` returns.
+
+I traced the request from route → service → DB and fixed the gap: `add_film` now catches
+`FilmNotFoundError` → **404** and `AlreadyInWatchlistError` → **409**, matching the collection
+route exactly. I also added three route-level tests (`app.test_client()`) that assert the add
+endpoint returns 201 / 404 / 409 — so the full request-response cycle is now covered, not just the
+service layer. Commit: `fix: return 404/409 from watchlist add endpoint instead of unhandled 500`.
+
 ## Commit History
 
 Rewritten to Conventional Commits, one logical change per commit, fully **linear** with **no merge
-commits** anywhere in history (newest first):
+commits** anywhere in history. The `git log --oneline` screenshot below is the authoritative record;
+the core commits are (newest first):
 
 ```
+fix:  return 404/409 from watchlist add endpoint instead of unhandled 500
 test: add tests for remove_from_watchlist and visibility toggle
 feat: add watchlist visibility toggle endpoint
 feat: add remove_from_watchlist function and endpoint
@@ -265,4 +280,5 @@ or toggling a film that isn't on the list raises `NotInWatchlistError`.
         -H "Content-Type: application/json" -d '{"film_id": "<film_id>"}'
    # → 200 {"message": "Removed from watchlist"}; removing again → 404 NotInWatchlistError
    ```
-9. Run the suite: `pytest tests/ -v` → 11 passed.
+9. Add a nonexistent-film UUID via the endpoint → **404**; add a duplicate → **409** (not a 500).
+10. Run the suite: `pytest tests/ -v` → 14 passed.
