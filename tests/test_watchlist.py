@@ -10,8 +10,11 @@ from app import create_app, db
 from models import User, Film, WatchlistEntry
 from services.watchlist_service import (
     add_to_watchlist,
+    remove_from_watchlist,
+    set_watchlist_visibility,
     get_watchlist,
     AlreadyInWatchlistError,
+    NotInWatchlistError,
 )
 from services.collection_service import FilmNotFoundError
 
@@ -102,3 +105,65 @@ def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
 
         with pytest.raises(FilmNotFoundError):
             add_to_watchlist(user_id=sample_user, film_id=fake_film_id)
+
+
+# ── Remove ───────────────────────────────────────────────────────────────────
+
+def test_remove_from_watchlist_removes_entry(app, sample_user, sample_film):
+    """
+    Removing a film that is on the watchlist should delete the entry.
+    """
+    with app.app_context():
+        add_to_watchlist(user_id=sample_user, film_id=sample_film)
+
+        assert remove_from_watchlist(user_id=sample_user, film_id=sample_film) is True
+
+        count = WatchlistEntry.query.filter_by(
+            user_id=sample_user, film_id=sample_film
+        ).count()
+        assert count == 0
+
+
+def test_remove_from_watchlist_not_present_raises(app, sample_user, sample_film):
+    """
+    Edge case: removing a film that was never added should raise
+    NotInWatchlistError rather than silently succeeding. This guards against a
+    caller assuming a delete happened when nothing was on the list.
+    """
+    with app.app_context():
+        with pytest.raises(NotInWatchlistError):
+            remove_from_watchlist(user_id=sample_user, film_id=sample_film)
+
+
+# ── Visibility toggle ────────────────────────────────────────────────────────
+
+def test_set_watchlist_visibility_updates_public_flag(app, sample_user, sample_film):
+    """
+    Entries are private by default; set_watchlist_visibility(public=True) should
+    flip the entry to public, and public=False should flip it back.
+    """
+    with app.app_context():
+        entry = add_to_watchlist(user_id=sample_user, film_id=sample_film)
+        assert entry.public is False  # private by default
+
+        updated = set_watchlist_visibility(
+            user_id=sample_user, film_id=sample_film, public=True
+        )
+        assert updated.public is True
+
+        updated = set_watchlist_visibility(
+            user_id=sample_user, film_id=sample_film, public=False
+        )
+        assert updated.public is False
+
+
+def test_set_watchlist_visibility_not_present_raises(app, sample_user, sample_film):
+    """
+    Setting visibility on a film that isn't on the watchlist should raise
+    NotInWatchlistError.
+    """
+    with app.app_context():
+        with pytest.raises(NotInWatchlistError):
+            set_watchlist_visibility(
+                user_id=sample_user, film_id=sample_film, public=True
+            )
