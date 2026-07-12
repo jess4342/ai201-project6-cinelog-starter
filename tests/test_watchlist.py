@@ -167,3 +167,36 @@ def test_set_watchlist_visibility_not_present_raises(app, sample_user, sample_fi
             set_watchlist_visibility(
                 user_id=sample_user, film_id=sample_film, public=True
             )
+
+
+# ── Route-level error handling (add endpoint) ────────────────────────────────
+# These trace the full request→response cycle to confirm the route maps service
+# exceptions to HTTP status codes (not unhandled 500s), mirroring collection.py.
+
+def test_add_film_route_returns_201(app, sample_user, sample_film):
+    """Adding a valid film via POST returns 201."""
+    client = app.test_client()
+    resp = client.post(
+        f"/watchlist/{sample_user}/add", json={"film_id": sample_film}
+    )
+    assert resp.status_code == 201
+
+
+def test_add_film_route_nonexistent_returns_404(app, sample_user):
+    """A nonexistent film_id returns 404, not a 500 from an unhandled exception."""
+    client = app.test_client()
+    resp = client.post(
+        f"/watchlist/{sample_user}/add",
+        json={"film_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert resp.status_code == 404
+
+
+def test_add_film_route_duplicate_returns_409(app, sample_user, sample_film):
+    """Adding the same film twice returns 409 Conflict, not a 500."""
+    client = app.test_client()
+    client.post(f"/watchlist/{sample_user}/add", json={"film_id": sample_film})
+    resp = client.post(
+        f"/watchlist/{sample_user}/add", json={"film_id": sample_film}
+    )
+    assert resp.status_code == 409
