@@ -137,17 +137,59 @@ refactor`) so the reason for the change is legible in history.
 - `grep -rn "db.Integer" models.py` shows no integer foreign keys remain on the entry tables; the
   only remaining integers are genuine numeric fields (`Film.year`, `rating`).
 - The nonexistent-film test uses a UUID string and passes, exercising the UUID lookup path.
-- `git log --merges origin/main..HEAD` is empty — the branch is linear on top of `origin/main`
-  with no merge commits.
+- `git log --merges` on the branch is empty. My own commits never introduced a merge — but
+  `main`'s tip was itself a merge commit (`Merge pull request #2 from ascherj/chore/add-gitignore`),
+  so it appeared in my branch's ancestry. I rebased my commits onto the equivalent **linear**
+  commit `718a9a8` (`chore: add .gitignore`, whose tree is byte-for-byte identical to `main`'s
+  tip) using `git rebase --onto 718a9a8 <old-base>`. The history is now fully linear with no merge
+  commit anywhere, and because the content is unchanged the PR still merges into `main` cleanly.
+
+---
+
+## Stretch Features
+
+### remove_from_watchlist()
+Added `remove_from_watchlist(user_id, film_id)` in `services/watchlist_service.py` and a
+`DELETE /watchlist/<user_id>/remove` endpoint. It looks up the `(user_id, film_id)` entry and
+deletes it. **When the film isn't on the watchlist**, it raises a new `NotInWatchlistError`
+(HTTP 404 at the route) rather than silently succeeding — so a caller can't be fooled into
+thinking a delete happened when nothing was there. This directly mirrors the existing
+`remove_from_collection()` / `NotInCollectionError` pattern (same lookup, same "raise if missing"
+guard, same `db.session.delete` + `commit`). A test was written for it (see below).
+
+### Second test (beyond Comment 3)
+Comment 3 only required the nonexistent-film test. Beyond that, I added a separate `test:` commit
+(`test: add tests for remove_from_watchlist and visibility toggle`). Its headline edge case is
+**`test_remove_from_watchlist_not_present_raises`**: removing a film that was never added must
+raise `NotInWatchlistError`. I chose this case because a "remove" that no-ops silently is a classic
+source of bugs — a client deletes something, gets a success, and never learns the item wasn't
+there. The commit also covers the happy-path remove and the visibility toggle.
+
+### Visibility toggle endpoint
+Added `set_watchlist_visibility(user_id, film_id, public)` and a
+`PATCH /watchlist/<user_id>/visibility` endpoint. **How `public` works:** each `WatchlistEntry`
+has a boolean `public` column that **defaults to `False` (private)** — see Comment 4. This endpoint
+lets a caller change that flag for a single entry. **How a caller uses it:**
+```
+curl -X PATCH http://127.0.0.1:5000/watchlist/<user_id>/visibility \
+     -H "Content-Type: application/json" -d '{"film_id": "<film_id>", "public": true}'
+# → 200, entry JSON now shows "public": true
+```
+Send `"public": false` to make it private again. If the film isn't on the user's watchlist the
+endpoint returns 404 (`NotInWatchlistError`).
 
 ---
 
 ## Commit History
 
-Rewritten to Conventional Commits, one logical change per commit, linear on `origin/main`
-(no merge commits):
+Rewritten to Conventional Commits, one logical change per commit, fully **linear** with **no merge
+commits** anywhere in history (newest first):
 
 ```
+test: add tests for remove_from_watchlist and visibility toggle
+feat: add watchlist visibility toggle endpoint
+feat: add remove_from_watchlist function and endpoint
+docs: add PR response documenting watchlist design decisions
 test: add tests for add_to_watchlist including nonexistent film
 fix:  sort watchlist by date added instead of alphabetically
 fix:  default watchlist visibility to private
@@ -169,10 +211,14 @@ collection (films already watched). It provides:
 - `POST /watchlist/<user_id>/add` — add a film to a user's watchlist (body: `{ "film_id": "<uuid>" }`).
 - `GET /watchlist/<user_id>` — return the user's watchlist as film dicts with `date_added` and
   `public` metadata.
+- `DELETE /watchlist/<user_id>/remove` — remove a film (body: `{ "film_id": "<uuid>" }`). *(stretch)*
+- `PATCH /watchlist/<user_id>/visibility` — set an entry public/private
+  (body: `{ "film_id": "<uuid>", "public": true }`). *(stretch)*
 
 It's backed by a new `WatchlistEntry` model and `services/watchlist_service.py`, following the
 same structure as the collection feature. Adding a nonexistent film raises `FilmNotFoundError`;
-adding a film already on the list raises `AlreadyInWatchlistError` (no duplicate rows).
+adding a film already on the list raises `AlreadyInWatchlistError` (no duplicate rows); removing
+or toggling a film that isn't on the list raises `NotInWatchlistError`.
 
 ### Design decisions (made intentionally, not inherited)
 1. **Visibility defaults to private (`public=False`).** Optimizing for user trust: a "save for
@@ -207,4 +253,16 @@ adding a film already on the list raises `AlreadyInWatchlistError` (no duplicate
 4. Fetch the watchlist: `curl http://127.0.0.1:5000/watchlist/<user_id>` → the film, newest first.
 5. Add the same film again → the service raises `AlreadyInWatchlistError` (no duplicate row).
 6. Add a random UUID that isn't a real film → `FilmNotFoundError`.
-7. Run the suite: `pytest tests/ -v` → 7 passed.
+7. **(stretch)** Toggle visibility:
+   ```
+   curl -X PATCH http://127.0.0.1:5000/watchlist/<user_id>/visibility \
+        -H "Content-Type: application/json" -d '{"film_id": "<film_id>", "public": true}'
+   # → 200, entry JSON now shows "public": true
+   ```
+8. **(stretch)** Remove the film:
+   ```
+   curl -X DELETE http://127.0.0.1:5000/watchlist/<user_id>/remove \
+        -H "Content-Type: application/json" -d '{"film_id": "<film_id>"}'
+   # → 200 {"message": "Removed from watchlist"}; removing again → 404 NotInWatchlistError
+   ```
+9. Run the suite: `pytest tests/ -v` → 11 passed.
