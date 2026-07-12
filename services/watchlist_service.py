@@ -79,6 +79,37 @@ def remove_from_watchlist(user_id, film_id):
     return True
 
 
+def set_watchlist_visibility(user_id, film_id, public):
+    """
+    Set whether a user's watchlist entry is public or private.
+
+    Watchlist entries default to private (``public=False``); this lets a user
+    opt a specific entry into being shared, or flip it back to private.
+
+    Args:
+        user_id (str): UUID of the user.
+        film_id (str): UUID of the film.
+        public (bool): True to make the entry public, False to make it private.
+
+    Returns:
+        WatchlistEntry: The updated entry.
+
+    Raises:
+        NotInWatchlistError: If the film is not on the user's watchlist.
+    """
+    entry = WatchlistEntry.query.filter_by(
+        user_id=user_id, film_id=film_id
+    ).first()
+    if entry is None:
+        raise NotInWatchlistError(
+            f"Film '{film_id}' is not on this user's watchlist"
+        )
+
+    entry.public = bool(public)
+    db.session.commit()
+    return entry
+
+
 def get_watchlist(user_id):
     """
     Return all films on a user's watchlist, sorted by date added (newest first).

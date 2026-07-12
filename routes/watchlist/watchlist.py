@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request
 from services.watchlist_service import (
     add_to_watchlist,
     remove_from_watchlist,
+    set_watchlist_visibility,
     get_watchlist,
     NotInWatchlistError,
 )
@@ -52,5 +53,31 @@ def remove_film(user_id):
     try:
         remove_from_watchlist(user_id=user_id, film_id=data["film_id"])
         return jsonify({"message": "Removed from watchlist"}), 200
+    except NotInWatchlistError as e:
+        return jsonify({"error": str(e)}), 404
+
+
+@watchlist_bp.route("/<user_id>/visibility", methods=["PATCH"])
+def set_visibility(user_id):
+    """
+    PATCH /watchlist/<user_id>/visibility
+
+    Body: { "film_id": "<uuid>", "public": true }
+
+    Sets whether a single watchlist entry is public. Entries are private by
+    default; a caller sends public=true to share an entry, or public=false to
+    make it private again.
+    """
+    data = request.get_json()
+    if not data or "film_id" not in data or "public" not in data:
+        return jsonify({"error": "film_id and public are required"}), 400
+
+    try:
+        entry = set_watchlist_visibility(
+            user_id=user_id,
+            film_id=data["film_id"],
+            public=data["public"],
+        )
+        return jsonify(entry.to_dict()), 200
     except NotInWatchlistError as e:
         return jsonify({"error": str(e)}), 404
